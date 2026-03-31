@@ -1,0 +1,1 @@
+Inspect background command output and current status, with optional blocking wait.

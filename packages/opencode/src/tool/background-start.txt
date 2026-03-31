@@ -1,0 +1,1 @@
+Start a shell command in the background and return a job ID for later inspection.
