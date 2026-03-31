@@ -5,6 +5,7 @@ import { Log } from "../util/log"
 import path from "path"
 import fsSync from "fs"
 import { pathToFileURL } from "url"
+import { imageToJimp } from "@nut-tree-fork/shared"
 
 const log = Log.create({ service: "desktop-tool" })
 
@@ -24,7 +25,9 @@ async function loadNutJs() {
   if (nutCache) return nutCache
   if (nutFailed) {
     const details = nutError ? `: ${nutError.message}` : "."
-    throw new Error(`Desktop automation library not available${details} Please ensure @nut-tree-fork/nut-js is installed.`)
+    throw new Error(
+      `Desktop automation library not available${details} Please ensure @nut-tree-fork/nut-js is installed.`,
+    )
   }
   try {
     nutCache = await import(resolveNutJsImportSpecifier())
@@ -32,13 +35,15 @@ async function loadNutJs() {
   } catch (error) {
     nutFailed = true
     nutError = error instanceof Error ? error : new Error(String(error))
-    log.warn("@nut-tree-fork/nut-js not available, desktop tool disabled", { 
+    log.warn("@nut-tree-fork/nut-js not available, desktop tool disabled", {
       error: nutError.message,
       code: (error as any)?.code,
       platform: process.platform,
-      arch: process.arch 
+      arch: process.arch,
     })
-    throw new Error(`Desktop automation library not available: ${nutError.message}. Please ensure @nut-tree-fork/nut-js is installed.`)
+    throw new Error(
+      `Desktop automation library not available: ${nutError.message}. Please ensure @nut-tree-fork/nut-js is installed.`,
+    )
   }
 }
 
@@ -93,7 +98,7 @@ export const DesktopTool = Tool.define("desktop", async () => {
             height = await nut.screen.height()
           }
 
-          const imageBuffer = await image.toPNG()
+          const imageBuffer = await imageToJimp(image).getBufferAsync("image/png")
           const base64Data = imageBuffer.toString("base64")
 
           return {
