@@ -5,6 +5,7 @@ import { Log } from "../util/log"
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
+import { pathToFileURL } from "url"
 
 const log = Log.create({ service: "desktop-tool" })
 
@@ -12,21 +13,57 @@ let nutCache: any = undefined
 let nutFailed = false
 let nutError: Error | undefined = undefined
 
+function root() {
+  return path.join(path.dirname(process.execPath), "..")
+}
+
+function paths() {
+  return [path.join(root(), "node_modules", "@nut-tree-fork", "nut-js", "dist", "index.js")]
+}
+
+async function repair() {
+  const file = path.join(root(), "node_modules", "@nut-tree-fork", "libnut-darwin", "permissionCheck.js")
+  const next = 'let libnut = require("./build/Release/libnut.node");'
+  const body = await fs.readFile(file, "utf8").catch(() => "")
+  if (!body || body.includes(next)) return
+  const text = body
+    .replace('let libnut = require("bindings")("libnut");', next)
+    .replace('  libnut = require("bindings")("libnut");', '  libnut = require("./build/Release/libnut.node");')
+  if (text === body) return
+  await fs.writeFile(file, text)
+}
+
+async function load(file: string) {
+  await repair()
+  await fs.access(file)
+  return import(pathToFileURL(file).href)
+}
+
 async function loadNutJs() {
   if (nutCache) return nutCache
   if (nutFailed) {
     const details = nutError ? `: ${nutError.message}` : "."
     throw new Error(`Desktop automation library not available${details} Please ensure @nut-tree-fork/nut-js is installed.`)
   }
+  for (const file of paths()) {
+    try {
+      nutCache = await load(file)
+      log.info("loaded @nut-tree-fork/nut-js from runtime path", { file })
+      return nutCache
+    } catch {
+      continue
+    }
+  }
   try {
     nutCache = await import("@nut-tree-fork/nut-js")
     return nutCache
   } catch (error) {
+    const first = error instanceof Error ? error : new Error(String(error))
     nutFailed = true
-    nutError = error instanceof Error ? error : new Error(String(error))
+    nutError = first
     log.warn("@nut-tree-fork/nut-js not available, desktop tool disabled", { 
       error: nutError.message,
-      code: (error as any)?.code,
+      code: "code" in first ? String(first.code) : undefined,
       platform: process.platform,
       arch: process.arch 
     })
