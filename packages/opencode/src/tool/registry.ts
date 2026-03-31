@@ -36,6 +36,7 @@ import { DesktopTool } from "./desktop"
 import { BrowserTool } from "./browser"
 import { SwarmTool } from "./swarm"
 import { EnterWorktreeTool, ExitWorktreeTool } from "./worktree"
+import { BackgroundStartTool, BackgroundOutputTool, BackgroundCancelTool } from "./background"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -136,6 +137,9 @@ export namespace ToolRegistry {
           DesktopTool,
           BrowserTool,
           SwarmTool,
+          BackgroundStartTool,
+          BackgroundOutputTool,
+          BackgroundCancelTool,
           EnterWorktreeTool,
           ExitWorktreeTool,
           SkillTool,
