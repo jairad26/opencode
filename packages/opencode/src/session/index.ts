@@ -1,5 +1,6 @@
 import { Slug } from "@opencode-ai/util/slug"
 import path from "path"
+import { readdirSync } from "fs"
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Decimal } from "decimal.js"
@@ -34,6 +35,7 @@ import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
 import { Effect, Layer, Scope, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
+import { Database as Sqlite } from "bun:sqlite"
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -183,6 +185,11 @@ export namespace Session {
   })
   export type GlobalInfo = z.output<typeof GlobalInfo>
 
+  export const DiscoverInfo = GlobalInfo.extend({
+    db: z.string(),
+  })
+  export type DiscoverInfo = z.output<typeof DiscoverInfo>
+
   export const Event = {
     Created: SyncEvent.define({
       type: "session.created",
@@ -239,6 +246,160 @@ export namespace Session {
       ? path.join(Instance.worktree, ".opencode", "plans")
       : path.join(Global.Path.data, "plans")
     return path.join(base, [input.time.created, input.slug].join("-") + ".md")
+  }
+
+  function files() {
+    try {
+      return [
+        ...new Set(
+          readdirSync(Global.Path.data)
+            .filter((x) => /^opencode.*\.db$/i.test(x))
+            .map((x) => path.join(Global.Path.data, x)),
+        ),
+      ]
+    } catch {
+      return []
+    }
+  }
+
+  function sandboxes(input: unknown) {
+    if (typeof input !== "string") return []
+    try {
+      const value = JSON.parse(input)
+      return Array.isArray(value) ? value : []
+    } catch {
+      return []
+    }
+  }
+
+  function match(
+    row: Record<string, unknown>,
+    input?: {
+      directory?: string
+      roots?: boolean
+      start?: number
+      cursor?: number
+      search?: string
+      archived?: boolean
+    },
+  ) {
+    if (input?.directory) {
+      const dir = row.directory
+      const root = row.project_worktree
+      const boxes = sandboxes(row.project_sandboxes)
+      if (dir !== input.directory && root !== input.directory && !boxes.includes(input.directory)) return false
+    }
+    if (input?.roots && row.parent_id != null) return false
+    if (input?.start && Number(row.time_updated) < input.start) return false
+    if (input?.cursor && Number(row.time_updated) >= input.cursor) return false
+    if (
+      input?.search &&
+      !String(row.title ?? "")
+        .toLowerCase()
+        .includes(input.search.toLowerCase())
+    )
+      return false
+    if (!input?.archived && row.time_archived != null) return false
+    return true
+  }
+
+  function* scan(input?: {
+    directory?: string
+    roots?: boolean
+    start?: number
+    cursor?: number
+    search?: string
+    limit?: number
+    archived?: boolean
+  }) {
+    const seen = new Set<string>()
+    const rows = files()
+      .flatMap((file) => {
+        try {
+          const db = new Sqlite(file, { readonly: true })
+          const rows = db
+            .query(
+              `SELECT session.*, project.id AS project_summary_id, project.name AS project_name, project.worktree AS project_worktree, project.sandboxes AS project_sandboxes
+               FROM session
+               LEFT JOIN project ON project.id = session.project_id`,
+            )
+            .all() as Record<string, unknown>[]
+          db.close()
+          return rows
+            .filter((row) => match(row, input))
+            .map((row) => ({
+              ...fromRow(row as SessionRow),
+              project: row.project_summary_id
+                ? {
+                    id: row.project_summary_id as string,
+                    name: (row.project_name as string | null) ?? undefined,
+                    worktree: row.project_worktree as string,
+                  }
+                : null,
+              db: file,
+            }))
+        } catch {
+          return []
+        }
+      })
+      .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+      .filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        return true
+      })
+
+    for (const row of rows.slice(0, input?.limit ?? 100)) {
+      yield row
+    }
+  }
+
+  export function discover(input?: {
+    directory?: string
+    roots?: boolean
+    start?: number
+    cursor?: number
+    search?: string
+    limit?: number
+    archived?: boolean
+  }) {
+    return scan(input)
+  }
+
+  export function info(id: SessionID | string) {
+    const item = [...scan({ limit: Number.MAX_SAFE_INTEGER, archived: true })].find((x) => x.id === id)
+    if (!item) throw new NotFoundError({ message: `Session not found: ${id}` })
+    return item
+  }
+
+  export function read(input: { sessionID: SessionID | string; limit?: number }) {
+    const session = info(input.sessionID)
+    const db = new Sqlite(session.db, { readonly: true })
+    const rows = db
+      .query(`SELECT * FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT ?`)
+      .all(String(input.sessionID), input.limit ?? 100) as Record<string, unknown>[]
+    const result = rows.toReversed().map((row) => {
+      const parts = db.query(`SELECT * FROM part WHERE message_id = ? ORDER BY id ASC`).all(String(row.id)) as Record<
+        string,
+        unknown
+      >[]
+      return {
+        info: {
+          ...(JSON.parse(String(row.data)) as object),
+          id: row.id,
+          sessionID: row.session_id,
+          time: { created: Number(row.time_created) },
+        },
+        parts: parts.map((part) => ({
+          ...(JSON.parse(String(part.data)) as object),
+          id: part.id,
+          sessionID: part.session_id,
+          messageID: part.message_id,
+        })),
+      }
+    })
+    db.close()
+    return result as MessageV2.WithParts[]
   }
 
   export const getUsage = (input: {

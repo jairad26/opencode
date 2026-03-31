@@ -27,6 +27,11 @@ import { SkillTool } from "../../tool/skill"
 import { BashTool } from "../../tool/bash"
 import { TodoWriteTool } from "../../tool/todo"
 import { Locale } from "../../util/locale"
+import { Session } from "../../session"
+
+export function continueID(input: { search?: string }) {
+  return [...Session.discover({ roots: true, search: input.search, limit: 1 })][0]?.id
+}
 
 type ToolProps<T extends Tool.Info> = {
   input: Tool.InferParameters<T>
@@ -238,6 +243,10 @@ export const RunCommand = cmd({
         describe: "continue the last session",
         type: "boolean",
       })
+      .option("continue-search", {
+        describe: "filter continued sessions by title",
+        type: "string",
+      })
       .option("session", {
         alias: ["s"],
         describe: "session id to continue",
@@ -379,7 +388,7 @@ export const RunCommand = cmd({
     }
 
     async function session(sdk: OpencodeClient) {
-      const baseID = args.continue ? (await sdk.session.list()).data?.find((s) => !s.parentID)?.id : args.session
+      const baseID = args.session ?? (args.continue ? continueID({ search: args.continueSearch }) : undefined)
 
       if (baseID && args.fork) {
         const forked = await sdk.session.fork({ sessionID: baseID })

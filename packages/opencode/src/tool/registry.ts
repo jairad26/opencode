@@ -35,6 +35,10 @@ import { makeRuntime } from "@/effect/run-service"
 import { DesktopTool } from "./desktop"
 import { BrowserTool } from "./browser"
 import { SwarmTool } from "./swarm"
+import { SessionListTool } from "./session_list"
+import { SessionSearchTool } from "./session_search"
+import { SessionInfoTool } from "./session_info"
+import { SessionReadTool } from "./session_read"
 import { EnterWorktreeTool, ExitWorktreeTool } from "./worktree"
 import { BackgroundStartTool, BackgroundOutputTool, BackgroundCancelTool } from "./background"
 
@@ -137,6 +141,10 @@ export namespace ToolRegistry {
           DesktopTool,
           BrowserTool,
           SwarmTool,
+          SessionListTool,
+          SessionSearchTool,
+          SessionInfoTool,
+          SessionReadTool,
           BackgroundStartTool,
           BackgroundOutputTool,
           BackgroundCancelTool,
