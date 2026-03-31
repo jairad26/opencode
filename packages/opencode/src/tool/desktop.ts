@@ -24,8 +24,6 @@ async function tempFile() {
 }
 
 export const DesktopTool = Tool.define("desktop", async () => {
-  await loadNutJs()
-
   return {
     description: DESCRIPTION,
     parameters: z.object({
