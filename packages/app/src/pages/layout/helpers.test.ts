@@ -198,6 +198,26 @@ describe("layout workspace helpers", () => {
     expect(result?.id).toBe("root")
   })
 
+  test("includes root sessions from subdirectories of the same workspace", () => {
+    const result = latestRootSession(
+      [
+        {
+          path: { directory: "/workspace" },
+          session: [
+            session({
+              id: "subdir",
+              directory: "/workspace/src",
+              time: { created: 30, updated: 30, archived: undefined },
+            }),
+          ],
+        },
+      ],
+      120_000,
+    )
+
+    expect(result?.id).toBe("subdir")
+  })
+
   test("formats fallback project display name", () => {
     expect(displayName({ worktree: "/tmp/app" })).toBe("app")
     expect(displayName({ worktree: "/tmp/app", name: "My App" })).toBe("My App")

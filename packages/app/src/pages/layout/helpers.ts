@@ -14,6 +14,15 @@ export const workspaceKey = (directory: string) => {
   return value.replace(/\/+$/, "")
 }
 
+const within = (dir: string, root: string) => {
+  const a = workspaceKey(dir)
+  const b = workspaceKey(root)
+  if (a === b) return true
+  if (b === "/") return a.startsWith("/")
+  if (/^[A-Za-z]:\/$/i.test(b)) return a.startsWith(b)
+  return a.startsWith(`${b}/`)
+}
+
 function sortSessions(now: number) {
   const oneMinuteAgo = now - 60 * 1000
   return (a: Session, b: Session) => {
@@ -29,7 +38,7 @@ function sortSessions(now: number) {
 }
 
 const isRootVisibleSession = (session: Session, directory: string) =>
-  workspaceKey(session.directory) === workspaceKey(directory) && !session.parentID && !session.time?.archived
+  within(session.directory, directory) && !session.parentID && !session.time?.archived
 
 const roots = (store: SessionStore) =>
   (store.session ?? []).filter((session) => isRootVisibleSession(session, store.path.directory))
