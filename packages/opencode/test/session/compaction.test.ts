@@ -458,6 +458,76 @@ describe("session.compaction.create", () => {
 })
 
 describe("session.compaction.prune", () => {
+  test("selects only eligible older completed tool outputs in deterministic order", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const u0 = await user(session.id, "u0")
+        const a0 = await assistant(session.id, u0.id, tmp.path)
+        const p0 = await tool(session.id, a0.id, "bash", "x".repeat(120_000))
+
+        const u1 = await user(session.id, "u1")
+        const a1 = await assistant(session.id, u1.id, tmp.path)
+        const p1 = await tool(session.id, a1.id, "bash", "x".repeat(120_000))
+
+        const u2 = await user(session.id, "u2")
+        const a2 = await assistant(session.id, u2.id, tmp.path)
+        const p2 = await tool(session.id, a2.id, "bash", "x".repeat(120_000))
+
+        const u3 = await user(session.id, "u3")
+        const a3 = await assistant(session.id, u3.id, tmp.path)
+        const p3 = await tool(session.id, a3.id, "bash", "x".repeat(120_000))
+
+        await user(session.id, "u4")
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const plan = SessionCompaction.prunePlan({ messages: msgs })
+
+        expect(plan.parts.map((part) => part.id)).toEqual([p1.id, p0.id])
+        expect(plan.parts.some((part) => part.id === p2.id)).toBe(false)
+        expect(plan.parts.some((part) => part.id === p3.id)).toBe(false)
+        expect(plan.shouldPrune).toBe(true)
+      },
+    })
+  })
+
+  test("does not prune when candidate total is at or below minimum", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const u1 = await user(session.id, "first")
+        const a1 = await assistant(session.id, u1.id, tmp.path)
+        await tool(session.id, a1.id, "bash", "x".repeat(80_000))
+
+        const u2 = await user(session.id, "second")
+        const a2 = await assistant(session.id, u2.id, tmp.path)
+        await tool(session.id, a2.id, "bash", "x".repeat(160_000))
+
+        await user(session.id, "third")
+        await user(session.id, "fourth")
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const plan = SessionCompaction.prunePlan({ messages: msgs })
+        expect(plan.pruned).toBe(20_000)
+        expect(plan.shouldPrune).toBe(false)
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const all = await Session.messages({ sessionID: session.id })
+        const compacted = all
+          .flatMap((msg) => msg.parts)
+          .flatMap((part) =>
+            part.type === "tool" && part.state.status === "completed" && part.state.time.compacted ? [part] : [],
+          )
+        expect(compacted).toHaveLength(0)
+      },
+    })
+  })
+
   test("compacts old completed tool output", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
