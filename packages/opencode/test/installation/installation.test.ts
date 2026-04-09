@@ -53,7 +53,7 @@ describe("installation", () => {
       const layer = testLayer(() => jsonResponse({ tag_name: "v1.2.3" }))
 
       const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("unknown")).pipe(Effect.provide(layer)),
+        Installation.Service.use((svc) => svc.latest()).pipe(Effect.provide(layer)),
       )
       expect(result).toBe("1.2.3")
     })
@@ -62,90 +62,20 @@ describe("installation", () => {
       const layer = testLayer(() => jsonResponse({ tag_name: "v4.0.0-beta.1" }))
 
       const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("curl")).pipe(Effect.provide(layer)),
+        Installation.Service.use((svc) => svc.latest()).pipe(Effect.provide(layer)),
       )
       expect(result).toBe("4.0.0-beta.1")
     })
 
-    test("reads npm registry versions", async () => {
-      const layer = testLayer(
-        () => jsonResponse({ version: "1.5.0" }),
-        (cmd, args) => {
-          if (cmd === "npm" && args.includes("registry")) return "https://registry.npmjs.org\n"
-          return ""
-        },
-      )
-
-      const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("npm")).pipe(Effect.provide(layer)),
-      )
-      expect(result).toBe("1.5.0")
-    })
-
-    test("reads npm registry versions for bun method", async () => {
-      const layer = testLayer(
-        () => jsonResponse({ version: "1.6.0" }),
-        () => "",
-      )
-
-      const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("bun")).pipe(Effect.provide(layer)),
-      )
-      expect(result).toBe("1.6.0")
-    })
-
-    test("reads scoop manifest versions", async () => {
-      const layer = testLayer(() => jsonResponse({ version: "2.3.4" }))
-
-      const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("scoop")).pipe(Effect.provide(layer)),
-      )
-      expect(result).toBe("2.3.4")
-    })
-
-    test("reads chocolatey feed versions", async () => {
-      const layer = testLayer(() => jsonResponse({ d: { results: [{ Version: "3.4.5" }] } }))
-
-      const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("choco")).pipe(Effect.provide(layer)),
-      )
-      expect(result).toBe("3.4.5")
-    })
-
-    test("reads brew formulae API versions", async () => {
-      const layer = testLayer(
-        () => jsonResponse({ versions: { stable: "2.0.0" } }),
-        (cmd, args) => {
-          // getBrewFormula: return core formula (no tap)
-          if (cmd === "brew" && args.includes("--formula") && args.includes("anomalyco/tap/opencode")) return ""
-          if (cmd === "brew" && args.includes("--formula") && args.includes("opencode")) return "opencode"
-          return ""
-        },
-      )
-
-      const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("brew")).pipe(Effect.provide(layer)),
-      )
-      expect(result).toBe("2.0.0")
-    })
-
-    test("reads brew tap info JSON via CLI", async () => {
-      const brewInfoJson = JSON.stringify({
-        formulae: [{ versions: { stable: "2.1.0" } }],
+    test("fetches from fork repo", async () => {
+      let url = ""
+      const layer = testLayer((req) => {
+        url = req.url
+        return jsonResponse({ tag_name: "v2.0.0" })
       })
-      const layer = testLayer(
-        () => jsonResponse({}), // HTTP not used for tap formula
-        (cmd, args) => {
-          if (cmd === "brew" && args.includes("anomalyco/tap/opencode") && args.includes("--formula")) return "opencode"
-          if (cmd === "brew" && args.includes("--json=v2")) return brewInfoJson
-          return ""
-        },
-      )
 
-      const result = await Effect.runPromise(
-        Installation.Service.use((svc) => svc.latest("brew")).pipe(Effect.provide(layer)),
-      )
-      expect(result).toBe("2.1.0")
+      await Effect.runPromise(Installation.Service.use((svc) => svc.latest()).pipe(Effect.provide(layer)))
+      expect(url).toContain("jairad26/opencode")
     })
   })
 })

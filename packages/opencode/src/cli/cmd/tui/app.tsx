@@ -896,7 +896,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     const choice = await DialogConfirm.show(
       dialog,
       `Update Available`,
-      `A new release v${version} is available. Would you like to update now?`,
+      `A new fork release v${version} is available. Would you like to pull and rebuild now?`,
       "skip",
     )
 
@@ -928,7 +928,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     await DialogAlert.show(
       dialog,
       "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
+      `Successfully pulled and rebuilt v${result.data.version}. Please restart the application.`,
     )
 
     exit()
