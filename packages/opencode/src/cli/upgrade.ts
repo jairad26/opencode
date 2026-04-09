@@ -2,6 +2,7 @@ import { Bus } from "@/bus"
 import { Config } from "@/config/config"
 import { Flag } from "@/flag/flag"
 import { Installation } from "@/installation"
+import semver from "semver"
 
 export async function upgrade() {
   const config = await Config.getGlobal()
@@ -16,6 +17,11 @@ export async function upgrade() {
 
   if (Installation.VERSION === latest) return
   if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return
+
+  if (Installation.isLocal() || !semver.valid(Installation.VERSION)) {
+    await Bus.publish(Installation.Event.UpdateAvailable, { version: latest })
+    return
+  }
 
   const kind = Installation.getReleaseType(Installation.VERSION, latest)
 
