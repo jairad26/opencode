@@ -323,3 +323,7 @@ export namespace Permission {
     return runPromise((s) => s.list())
   }
 }
+
+export { PermissionRouter } from "./router"
+export { PermissionClassifier } from "./classifier"
+export { PermissionRouterService } from "./router-service"

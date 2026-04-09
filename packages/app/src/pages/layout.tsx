@@ -65,6 +65,8 @@ import { Titlebar } from "@/components/titlebar"
 import { useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
 import {
+  attentionTitle,
+  awaitingSessions,
   displayName,
   effectiveWorkspaceOrder,
   errorMessage,
@@ -87,6 +89,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { SessionItem } from "./layout/sidebar-items"
 
 export default function Layout(props: ParentProps) {
   const [store, setStore, , ready] = persisted(
@@ -418,14 +421,32 @@ export default function Layout(props: ParentProps) {
     onMount(() => {
       const toastBySession = new Map<string, number>()
       const alertedAtBySession = new Map<string, number>()
+      const attention = new Set<string>()
       const cooldownMs = 5000
+      const baseTitle = document.title
+
+      const syncAttention = () => {
+        const count = attention.size
+        document.title = attentionTitle(baseTitle, count)
+        const nav = navigator as Navigator & {
+          setAppBadge?: (count?: number) => Promise<void>
+          clearAppBadge?: () => Promise<void>
+        }
+        if (count > 0) {
+          void nav.setAppBadge?.(count).catch(() => undefined)
+          return
+        }
+        void nav.clearAppBadge?.().catch(() => undefined)
+      }
 
       const dismissSessionAlert = (sessionKey: string) => {
         const toastId = toastBySession.get(sessionKey)
-        if (toastId === undefined) return
-        toaster.dismiss(toastId)
-        toastBySession.delete(sessionKey)
+        if (toastId !== undefined) {
+          toaster.dismiss(toastId)
+          toastBySession.delete(sessionKey)
+        }
         alertedAtBySession.delete(sessionKey)
+        if (attention.delete(sessionKey)) syncAttention()
       }
 
       const unsub = globalSDK.event.listen((e) => {
@@ -499,6 +520,8 @@ export default function Layout(props: ParentProps) {
         if (workspaceKey(directory) === workspaceKey(currentDir()) && session?.parentID === currentSession) return
 
         dismissSessionAlert(sessionKey)
+        attention.add(sessionKey)
+        syncAttention()
 
         const toastId = showToast({
           persistent: true,
@@ -519,6 +542,12 @@ export default function Layout(props: ParentProps) {
         toastBySession.set(sessionKey, toastId)
       })
       onCleanup(unsub)
+      onCleanup(() => {
+        attention.clear()
+        document.title = baseTitle
+        const nav = navigator as Navigator & { clearAppBadge?: () => Promise<void> }
+        void nav.clearAppBadge?.().catch(() => undefined)
+      })
 
       createEffect(() => {
         const currentSession = params.id
@@ -2045,6 +2074,12 @@ export default function Layout(props: ParentProps) {
       if (!item) return [] as string[]
       return workspaceIds(item)
     })
+    const awaiting = createMemo(() =>
+      workspaces().flatMap((directory) => {
+        const [data] = globalSync.child(directory, { bootstrap: false })
+        return awaitingSessions(data, sortNow(), (item) => !permission.autoResponds(item, directory))
+      }),
+    )
     const unseenCount = createMemo(() =>
       workspaces().reduce((total, directory) => total + notification.project.unseenCount(directory), 0),
     )
@@ -2208,6 +2243,42 @@ export default function Layout(props: ParentProps) {
                 when={workspacesEnabled()}
                 fallback={
                   <>
+                    <Show when={awaiting().length > 0}>
+                      <div class="shrink-0 pb-3" data-component="sidebar-awaiting-input">
+                        <div class="rounded-xl border border-border-weak-base bg-background-stronger p-2 flex flex-col gap-2">
+                          <div class="px-2 pt-1 flex items-center justify-between gap-2">
+                            <div class="text-12-medium text-text-weak uppercase tracking-[0.08em]">
+                              Awaiting your input
+                            </div>
+                            <div class="text-12-medium text-text-weak">{awaiting().length}</div>
+                          </div>
+                          <div class="flex flex-col gap-1">
+                            <For each={awaiting()}>
+                              {(item) => {
+                                const [data] = globalSync.child(item.session.directory, { bootstrap: false })
+                                return (
+                                  <div class="rounded-lg border border-border-weaker-base bg-background-base px-1 py-1">
+                                    <div class="px-2 pb-1 text-11-medium text-text-weak">
+                                      {item.reason === "permission"
+                                        ? language.t("notification.permission.title")
+                                        : language.t("notification.question.title")}
+                                    </div>
+                                    <SessionItem
+                                      {...workspaceSidebarCtx}
+                                      session={item.session}
+                                      list={sortedRootSessions(data, sortNow())}
+                                      navList={workspaceSidebarCtx.navList}
+                                      slug={base64Encode(item.session.directory)}
+                                      mobile={panelProps.mobile}
+                                    />
+                                  </div>
+                                )
+                              }}
+                            </For>
+                          </div>
+                        </div>
+                      </div>
+                    </Show>
                     <div class="shrink-0 py-4">
                       <Button
                         size="large"
@@ -2234,6 +2305,42 @@ export default function Layout(props: ParentProps) {
                 }
               >
                 <>
+                  <Show when={awaiting().length > 0}>
+                    <div class="shrink-0 pb-3" data-component="sidebar-awaiting-input">
+                      <div class="rounded-xl border border-border-weak-base bg-background-stronger p-2 flex flex-col gap-2">
+                        <div class="px-2 pt-1 flex items-center justify-between gap-2">
+                          <div class="text-12-medium text-text-weak uppercase tracking-[0.08em]">
+                            Awaiting your input
+                          </div>
+                          <div class="text-12-medium text-text-weak">{awaiting().length}</div>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                          <For each={awaiting()}>
+                            {(item) => {
+                              const [data] = globalSync.child(item.session.directory, { bootstrap: false })
+                              return (
+                                <div class="rounded-lg border border-border-weaker-base bg-background-base px-1 py-1">
+                                  <div class="px-2 pb-1 text-11-medium text-text-weak">
+                                    {item.reason === "permission"
+                                      ? language.t("notification.permission.title")
+                                      : language.t("notification.question.title")}
+                                  </div>
+                                  <SessionItem
+                                    {...workspaceSidebarCtx}
+                                    session={item.session}
+                                    list={sortedRootSessions(data, sortNow())}
+                                    navList={workspaceSidebarCtx.navList}
+                                    slug={base64Encode(item.session.directory)}
+                                    mobile={panelProps.mobile}
+                                  />
+                                </div>
+                              )
+                            }}
+                          </For>
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
                   <div class="shrink-0 py-4">
                     <Button
                       size="large"

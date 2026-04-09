@@ -30,6 +30,12 @@ import { pathToFileURL } from "url"
 import { Effect, Layer, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import { DesktopTool } from "./desktop"
+import { BrowserTool } from "./browser"
+import { SwarmTool } from "./swarm"
+import { EnterWorktreeTool, ExitWorktreeTool } from "./worktree"
+import { BriefTool } from "./brief"
+import { SnipTool } from "./snip"
 import { Env } from "../env"
 import { Question } from "../question"
 import { Todo } from "../session/todo"
@@ -161,6 +167,13 @@ export namespace ToolRegistry {
             question: Tool.init(question),
             lsp: Tool.init(LspTool),
             plan: Tool.init(PlanExitTool),
+            desktop: Tool.init(DesktopTool),
+            browser: Tool.init(BrowserTool),
+            swarm: Tool.init(SwarmTool),
+            brief: Tool.init(BriefTool),
+            snip: Tool.init(SnipTool),
+            worktreeEnter: Tool.init(EnterWorktreeTool),
+            worktreeExit: Tool.init(ExitWorktreeTool),
           })
 
           return {
@@ -179,6 +192,13 @@ export namespace ToolRegistry {
               tool.todo,
               tool.search,
               tool.code,
+              tool.desktop,
+              tool.browser,
+              tool.swarm,
+              tool.brief,
+              tool.snip,
+              tool.worktreeEnter,
+              tool.worktreeExit,
               tool.skill,
               tool.patch,
               ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),

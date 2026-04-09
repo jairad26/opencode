@@ -14,8 +14,8 @@ import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
-import { sessionPermissionRequest } from "../session/composer/session-request-tree"
-import { childSessionOnPath, hasProjectPermissions } from "./helpers"
+import { sessionPermissionRequest, sessionQuestionRequest } from "../session/composer/session-request-tree"
+import { childSessionOnPath, hasProjectPermissions, projectAttention, sessionAttention } from "./helpers"
 
 const OPENCODE_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
 
@@ -34,7 +34,21 @@ export const ProjectIcon = (props: { project: LocalProject; class?: string; noti
       return hasProjectPermissions(store.permission, (item) => !permission.autoResponds(item, directory))
     }),
   )
-  const notify = createMemo(() => props.notify && (hasPermissions() || unseenCount() > 0))
+  const hasQuestions = createMemo(() =>
+    dirs().some((directory) => {
+      const [store] = globalSync.child(directory, { bootstrap: false })
+      return hasProjectPermissions(store.question)
+    }),
+  )
+  const state = createMemo(() =>
+    projectAttention({
+      permission: hasPermissions(),
+      question: hasQuestions(),
+      error: hasError(),
+      unseen: unseenCount() > 0,
+    }),
+  )
+  const notify = createMemo(() => props.notify && state() !== "idle")
   const name = createMemo(() => props.project.name || getFilename(props.project.worktree))
 
   return (
@@ -52,11 +66,13 @@ export const ProjectIcon = (props: { project: LocalProject; class?: string; noti
       </div>
       <Show when={notify()}>
         <div
+          data-slot="project-state"
+          data-state={state()}
           classList={{
             "absolute top-px right-px size-1.5 rounded-full z-10": true,
-            "bg-surface-warning-strong": hasPermissions(),
-            "bg-icon-critical-base": !hasPermissions() && hasError(),
-            "bg-text-interactive-base": !hasPermissions() && !hasError(),
+            "bg-surface-warning-strong": state() === "permission" || state() === "question",
+            "bg-icon-critical-base": state() === "error",
+            "bg-text-interactive-base": state() === "unseen",
           }}
         />
       </Show>
@@ -88,6 +104,8 @@ const SessionRow = (props: {
   tint: Accessor<string | undefined>
   isWorking: Accessor<boolean>
   hasPermissions: Accessor<boolean>
+  hasQuestions: Accessor<boolean>
+  state: Accessor<string>
   hasError: Accessor<boolean>
   unseenCount: Accessor<number>
   clearHoverProjectSoon: () => void
@@ -108,27 +126,30 @@ const SessionRow = (props: {
         props.clearHoverProjectSoon()
       }}
     >
-      <Show when={props.isWorking() || props.hasPermissions() || props.hasError() || props.unseenCount() > 0}>
-        <div
-          class="shrink-0 size-6 flex items-center justify-center"
-          style={{ color: props.tint() ?? "var(--icon-interactive-base)" }}
-        >
-          <Switch>
-            <Match when={props.isWorking()}>
-              <Spinner class="size-[15px]" />
-            </Match>
-            <Match when={props.hasPermissions()}>
-              <div class="size-1.5 rounded-full bg-surface-warning-strong" />
-            </Match>
-            <Match when={props.hasError()}>
-              <div class="size-1.5 rounded-full bg-text-diff-delete-base" />
-            </Match>
-            <Match when={props.unseenCount() > 0}>
-              <div class="size-1.5 rounded-full bg-text-interactive-base" />
-            </Match>
-          </Switch>
-        </div>
-      </Show>
+      <div
+        data-slot="session-state"
+        data-state={props.state()}
+        class="shrink-0 size-6 flex items-center justify-center"
+        style={{ color: props.tint() ?? "var(--icon-interactive-base)" }}
+      >
+        <Switch fallback={<Icon name="dash" size="small" class="text-icon-weak" />}>
+          <Match when={props.isWorking()}>
+            <Spinner class="size-[15px]" />
+          </Match>
+          <Match when={props.hasPermissions()}>
+            <div class="size-1.5 rounded-full bg-surface-warning-strong" />
+          </Match>
+          <Match when={props.hasQuestions()}>
+            <div class="size-1.5 rounded-full bg-surface-warning-strong" />
+          </Match>
+          <Match when={props.hasError()}>
+            <div class="size-1.5 rounded-full bg-text-diff-delete-base" />
+          </Match>
+          <Match when={props.unseenCount() > 0}>
+            <div class="size-1.5 rounded-full bg-text-interactive-base" />
+          </Match>
+        </Switch>
+      </div>
       <span class="text-14-regular text-text-strong min-w-0 flex-1 truncate">{title()}</span>
     </A>
   )
@@ -149,8 +170,11 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       return !permission.autoResponds(item, props.session.directory)
     })
   })
+  const hasQuestions = createMemo(() => {
+    return !!sessionQuestionRequest(sessionStore.session, sessionStore.question, props.session.id)
+  })
   const isWorking = createMemo(() => {
-    if (hasPermissions()) return false
+    if (hasPermissions() || hasQuestions()) return false
     const pending = (sessionStore.message[props.session.id] ?? []).findLast(
       (message) =>
         message.role === "assistant" &&
@@ -164,6 +188,15 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       (status !== undefined && status.type !== "idle")
     )
   })
+  const state = createMemo(() =>
+    sessionAttention({
+      permission: hasPermissions(),
+      question: hasQuestions(),
+      error: hasError(),
+      unseen: unseenCount() > 0,
+      working: isWorking(),
+    }),
+  )
 
   const tint = createMemo(() => messageAgentColor(sessionStore.message[props.session.id], sessionStore.agent))
   const tooltip = createMemo(() => props.showTooltip ?? (props.mobile || !props.sidebarExpanded()))
@@ -201,6 +234,8 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       tint={tint}
       isWorking={isWorking}
       hasPermissions={hasPermissions}
+      hasQuestions={hasQuestions}
+      state={state}
       hasError={hasError}
       unseenCount={unseenCount}
       clearHoverProjectSoon={props.clearHoverProjectSoon}

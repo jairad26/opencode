@@ -4,9 +4,15 @@ export interface Args {
   model?: string
   agent?: string
   prompt?: string
+  remote?: boolean
+  workspaceID?: string
   continue?: boolean
   sessionID?: string
   fork?: boolean
+  remoteSessions?: {
+    id: string
+    title?: string
+  }[]
 }
 
 export const { use: useArgs, provider: ArgsProvider } = createSimpleContext({

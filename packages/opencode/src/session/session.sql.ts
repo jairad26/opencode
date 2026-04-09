@@ -3,6 +3,7 @@ import { ProjectTable } from "../project/project.sql"
 import type { MessageV2 } from "./message-v2"
 import type { Snapshot } from "../snapshot"
 import type { Permission } from "../permission"
+import type { Trigger } from "../trigger"
 import type { ProjectID } from "../project/schema"
 import type { SessionID, MessageID, PartID } from "./schema"
 import type { WorkspaceID } from "../control-plane/schema"
@@ -10,6 +11,7 @@ import { Timestamps } from "../storage/schema.sql"
 
 type PartData = Omit<MessageV2.Part, "id" | "sessionID" | "messageID">
 type InfoData = Omit<MessageV2.Info, "id" | "sessionID">
+type TriggerLast = NonNullable<Trigger.Info["last"]>
 
 export const SessionTable = sqliteTable(
   "session",
@@ -101,3 +103,26 @@ export const PermissionTable = sqliteTable("permission", {
   ...Timestamps,
   data: text({ mode: "json" }).notNull().$type<Permission.Ruleset>(),
 })
+
+export const TriggerTable = sqliteTable(
+  "trigger",
+  {
+    id: text().primaryKey(),
+    project_id: text()
+      .$type<ProjectID>()
+      .notNull()
+      .references(() => ProjectTable.id, { onDelete: "cascade" }),
+    schedule: text({ mode: "json" }).notNull().$type<Trigger.Info["schedule"]>(),
+    action: text({ mode: "json" }).$type<Trigger.Info["action"]>(),
+    webhook_secret: text(),
+    enabled: integer({ mode: "boolean" }).notNull(),
+    runs: integer().notNull(),
+    ...Timestamps,
+    last_source: text().$type<TriggerLast["source"]>(),
+    last_status: text().$type<TriggerLast["status"]>(),
+    last_error: text(),
+    time_last: integer(),
+    time_next: integer().notNull(),
+  },
+  (table) => [index("trigger_project_idx").on(table.project_id)],
+)

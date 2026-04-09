@@ -23,6 +23,7 @@ import {
 } from "@/context/settings"
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
+import { notificationPermissionCopy } from "./settings-general.helpers"
 import { Link } from "./link"
 import { SettingsList } from "./settings-list"
 
@@ -70,6 +71,10 @@ export const SettingsGeneral: Component = () => {
   const permission = usePermission()
   const platform = usePlatform()
   const params = useParams()
+  const [notify, { refetch: refetchNotify }] = createResource(async () => {
+    if (!platform.notificationPermission) return
+    return platform.notificationPermission()
+  })
   const settings = useSettings()
 
   onMount(() => {
@@ -426,6 +431,33 @@ export const SettingsGeneral: Component = () => {
             />
           </div>
         </SettingsRow>
+
+        <Show when={notify()} keyed>
+          {(state) => {
+            const item = () => notificationPermissionCopy(state)
+            return (
+              <SettingsRow title={item().title} description={item().description}>
+                <Show when={item().action && platform.requestNotificationPermission} fallback={<div />}>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={async () => {
+                      const next = await platform.requestNotificationPermission?.()
+                      await refetchNotify()
+                      if (next === "granted") {
+                        showToast({ title: "Notifications enabled" })
+                        return
+                      }
+                      showToast({ title: "Notifications not enabled" })
+                    }}
+                  >
+                    {item().action}
+                  </Button>
+                </Show>
+              </SettingsRow>
+            )
+          }}
+        </Show>
       </SettingsList>
     </div>
   )

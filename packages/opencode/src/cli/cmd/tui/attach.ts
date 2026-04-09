@@ -5,6 +5,7 @@ import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
 import { existsSync } from "fs"
+import { preflightRemote, resolveRemoteTarget } from "../remote"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
@@ -19,6 +20,10 @@ export const AttachCommand = cmd({
       .option("dir", {
         type: "string",
         description: "directory to run in",
+      })
+      .option("workspace", {
+        type: "string",
+        description: "workspace ID to use on the remote server",
       })
       .option("continue", {
         alias: ["c"],
@@ -66,6 +71,33 @@ export const AttachCommand = cmd({
         const auth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
         return { Authorization: auth }
       })()
+      const sdk = await preflightRemote({
+        url: args.url,
+        directory,
+        workspaceID: args.workspace,
+        headers,
+      }).catch((error) => {
+        UI.error(error instanceof Error ? error.message : String(error))
+        process.exit(1)
+      })
+      const target = await resolveRemoteTarget({
+        sdk,
+        directory,
+        continue: args.continue,
+        sessionID: args.session,
+        fork: args.fork,
+        defer: args.continue && !args.session,
+      }).catch((error) => {
+        UI.error(error instanceof Error ? error.message : String(error))
+        process.exit(1)
+      })
+      if (args.continue && target.baseID) {
+        UI.println(
+          UI.Style.TEXT_INFO_BOLD + "Continuing remote session" + UI.Style.TEXT_NORMAL,
+          target.title ?? target.baseID,
+          UI.Style.TEXT_DIM + `(${target.baseID})` + UI.Style.TEXT_NORMAL,
+        )
+      }
       const config = await Instance.provide({
         directory: directory && existsSync(directory) ? directory : process.cwd(),
         fn: () => TuiConfig.get(),
@@ -74,9 +106,12 @@ export const AttachCommand = cmd({
         url: args.url,
         config,
         args: {
-          continue: args.continue,
-          sessionID: args.session,
+          remote: true,
+          continue: target.remoteSessions || target.picked ? false : args.continue,
+          sessionID: target.picked ? target.baseID : args.session,
+          workspaceID: args.workspace,
           fork: args.fork,
+          remoteSessions: target.remoteSessions,
         },
         directory,
         headers,

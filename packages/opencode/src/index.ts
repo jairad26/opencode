@@ -28,6 +28,7 @@ import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
+import { TriggerCommand } from "./cli/cmd/trigger"
 import { DbCommand } from "./cli/cmd/db"
 import path from "path"
 import { Global } from "./global"
@@ -169,6 +170,7 @@ const cli = yargs(args)
   .command(GithubCommand)
   .command(PrCommand)
   .command(SessionCommand)
+  .command(TriggerCommand)
   .command(PluginCommand)
   .command(DbCommand)
   .fail((msg, err) => {
