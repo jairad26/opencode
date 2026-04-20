@@ -1,4 +1,2 @@
-import * as nut from "@nut-tree-fork/nut-js"
-
-export default nut
-export * from "@nut-tree-fork/nut-js"
+// TEMPORARILY DISABLED: broken after anomalyco 1.5.2 sync - needs migration. Runtime copy target for build.ts.
+export {}
