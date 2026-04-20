@@ -2,7 +2,7 @@ import { cmd } from "../cmd"
 import { UI } from "@/cli/ui"
 import { tui } from "./app"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
-import { TuiConfig } from "@/config/tui"
+import { TuiConfig } from "@/cli/cmd/tui/config/tui"
 import { Instance } from "@/project/instance"
 import { existsSync } from "fs"
 import { preflightRemote, resolveRemoteTarget } from "../remote"
@@ -61,7 +61,6 @@ export const AttachCommand = cmd({
           process.chdir(args.dir)
           return process.cwd()
         } catch {
-          // If the directory doesn't exist locally (remote attach), pass it through.
           return args.dir
         }
       })()

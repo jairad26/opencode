@@ -1,6 +1,6 @@
-import type { Project, UserMessage, VcsFileDiff } from "@opencode-ai/sdk/v2"
+import type { Project, UserMessage } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { useMutation } from "@tanstack/solid-query"
+import { createQuery, skipToken, useMutation, useQueryClient } from "@tanstack/solid-query"
 import {
   batch,
   onCleanup,
@@ -13,6 +13,7 @@ import {
   on,
   onMount,
   untrack,
+  createResource,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -27,7 +28,7 @@ import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { Button } from "@opencode-ai/ui/button"
 import { showToast } from "@opencode-ai/ui/toast"
-import { checksum } from "@opencode-ai/util/encode"
+import { checksum } from "@opencode-ai/shared/util/encode"
 import { useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { useComments } from "@/context/comments"
@@ -326,6 +327,7 @@ export default function Page() {
   const local = useLocal()
   const file = useFile()
   const sync = useSync()
+  const queryClient = useQueryClient()
   const dialog = useDialog()
   const language = useLanguage()
   const sdk = useSDK()
@@ -446,8 +448,6 @@ export default function Page() {
     review: reviewTab,
     hasReview: canReview,
   })
-  const contextOpen = tabState.contextOpen
-  const openedTabs = tabState.openedTabs
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
   const revertMessageID = createMemo(() => info()?.revert?.messageID)
@@ -490,7 +490,7 @@ export default function Page() {
     if (!tab) return
 
     const path = file.pathFromTab(tab)
-    if (path) file.load(path)
+    if (path) void file.load(path)
   })
 
   createEffect(
@@ -524,25 +524,6 @@ export default function Page() {
     deferRender: false,
   })
 
-  const [vcs, setVcs] = createStore<{
-    diff: {
-      git: VcsFileDiff[]
-      branch: VcsFileDiff[]
-    }
-    ready: {
-      git: boolean
-      branch: boolean
-    }
-  }>({
-    diff: {
-      git: [] as VcsFileDiff[],
-      branch: [] as VcsFileDiff[],
-    },
-    ready: {
-      git: false,
-      branch: false,
-    },
-  })
 
   const [followup, setFollowup] = persisted(
     Persist.workspace(sdk.directory, "followup", ["followup.v1"]),
@@ -577,68 +558,7 @@ export default function Page() {
   let todoTimer: number | undefined
   let diffFrame: number | undefined
   let diffTimer: number | undefined
-  const vcsTask = new Map<VcsMode, Promise<void>>()
-  const vcsRun = new Map<VcsMode, number>()
 
-  const bumpVcs = (mode: VcsMode) => {
-    const next = (vcsRun.get(mode) ?? 0) + 1
-    vcsRun.set(mode, next)
-    return next
-  }
-
-  const resetVcs = (mode?: VcsMode) => {
-    const list = mode ? [mode] : (["git", "branch"] as const)
-    list.forEach((item) => {
-      bumpVcs(item)
-      vcsTask.delete(item)
-      setVcs("diff", item, [])
-      setVcs("ready", item, false)
-    })
-  }
-
-  const loadVcs = (mode: VcsMode, force = false) => {
-    if (sync.project?.vcs !== "git") return Promise.resolve()
-    if (!force && vcs.ready[mode]) return Promise.resolve()
-
-    if (force) {
-      if (vcsTask.has(mode)) bumpVcs(mode)
-      vcsTask.delete(mode)
-      setVcs("ready", mode, false)
-    }
-
-    const current = vcsTask.get(mode)
-    if (current) return current
-
-    const run = bumpVcs(mode)
-
-    const task = sdk.client.vcs
-      .diff({ mode })
-      .then((result) => {
-        if (vcsRun.get(mode) !== run) return
-        setVcs("diff", mode, list(result.data))
-        setVcs("ready", mode, true)
-      })
-      .catch((error) => {
-        if (vcsRun.get(mode) !== run) return
-        console.debug("[session-review] failed to load vcs diff", { mode, error })
-        setVcs("diff", mode, [])
-        setVcs("ready", mode, true)
-      })
-      .finally(() => {
-        if (vcsTask.get(mode) === task) vcsTask.delete(mode)
-      })
-
-    vcsTask.set(mode, task)
-    return task
-  }
-
-  const refreshVcs = () => {
-    resetVcs()
-    const mode = untrack(vcsMode)
-    if (!mode) return
-    if (!untrack(wantsReview)) return
-    void loadVcs(mode, true)
-  }
 
   createComputed((prev) => {
     const open = desktopReviewOpen()
@@ -669,21 +589,52 @@ export default function Page() {
     list.push("turn")
     return list
   })
+  const mobileChanges = createMemo(() => !isDesktop() && store.mobileTab === "changes")
+  const wantsReview = createMemo(() =>
+    isDesktop()
+      ? desktopFileTreeOpen() || (desktopReviewOpen() && activeTab() === "review")
+      : store.mobileTab === "changes",
+  )
   const vcsMode = createMemo<VcsMode | undefined>(() => {
     if (store.changes === "git" || store.changes === "branch") return store.changes
   })
-  const reviewDiffs = createMemo(() => {
-    if (store.changes === "git") return list(vcs.diff.git)
-    if (store.changes === "branch") return list(vcs.diff.branch)
+  const vcsKey = createMemo(
+    () => ["session-vcs", sdk.directory, sync.data.vcs?.branch ?? "", sync.data.vcs?.default_branch ?? ""] as const,
+  )
+  const vcsQuery = createQuery(() => {
+    const mode = vcsMode()
+    const enabled = wantsReview() && sync.project?.vcs === "git"
+
+    return {
+      queryKey: [...vcsKey(), mode] as const,
+      enabled,
+      staleTime: Number.POSITIVE_INFINITY,
+      gcTime: 60 * 1000,
+      queryFn: mode
+        ? () =>
+            sdk.client.vcs
+              .diff({ mode })
+              .then((result) => list(result.data))
+              .catch((error) => {
+                console.debug("[session-review] failed to load vcs diff", { mode, error })
+                return []
+              })
+        : skipToken,
+    }
+  })
+  const refreshVcs = () => void queryClient.invalidateQueries({ queryKey: vcsKey() })
+  const reviewDiffs = () => {
+    if (store.changes === "git" || store.changes === "branch")
+      // avoids suspense
+      return vcsQuery.isFetched ? (vcsQuery.data ?? []) : []
     return turnDiffs()
-  })
-  const reviewCount = createMemo(() => reviewDiffs().length)
-  const hasReview = createMemo(() => reviewCount() > 0)
-  const reviewReady = createMemo(() => {
-    if (store.changes === "git") return vcs.ready.git
-    if (store.changes === "branch") return vcs.ready.branch
+  }
+  const reviewCount = () => reviewDiffs().length
+  const hasReview = () => reviewCount() > 0
+  const reviewReady = () => {
+    if (store.changes === "git" || store.changes === "branch") return !vcsQuery.isPending
     return true
-  })
+  }
 
   const newSessionWorktree = createMemo(() => {
     if (store.newSessionWorktree === "create") return "create"
@@ -811,8 +762,9 @@ export default function Page() {
 
   const hasScrollGesture = () => Date.now() - ui.scrollGesture < scrollGestureWindowMs
 
-  createEffect(
-    on([() => sdk.directory, () => params.id] as const, ([, id]) => {
+  const [sessionSync] = createResource(
+    () => [sdk.directory, params.id] as const,
+    ([directory, id]) => {
       if (refreshFrame !== undefined) cancelAnimationFrame(refreshFrame)
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
       refreshFrame = undefined
@@ -823,13 +775,10 @@ export default function Page() {
       const stale = !cached
         ? false
         : (() => {
-            const info = getSessionPrefetch(sdk.directory, id)
+            const info = getSessionPrefetch(directory, id)
             if (!info) return true
             return Date.now() - info.at > SESSION_PREFETCH_TTL
           })()
-      untrack(() => {
-        void sync.session.sync(id)
-      })
 
       refreshFrame = requestAnimationFrame(() => {
         refreshFrame = undefined
@@ -841,7 +790,9 @@ export default function Page() {
           })
         }, 0)
       })
-    }),
+
+      return sync.session.sync(id)
+    },
   )
 
   createEffect(
@@ -898,27 +849,6 @@ export default function Page() {
         setStore("messageId", undefined)
         setStore("changes", "git")
         setUi("pendingMessage", undefined)
-      },
-      { defer: true },
-    ),
-  )
-
-  createEffect(
-    on(
-      () => sdk.directory,
-      () => {
-        resetVcs()
-      },
-      { defer: true },
-    ),
-  )
-
-  createEffect(
-    on(
-      () => [sync.data.vcs?.branch, sync.data.vcs?.default_branch] as const,
-      (next, prev) => {
-        if (prev === undefined || same(next, prev)) return
-        refreshVcs()
       },
       { defer: true },
     ),
@@ -1057,7 +987,6 @@ export default function Page() {
     }
   }
 
-  const mobileChanges = createMemo(() => !isDesktop() && store.mobileTab === "changes")
   const mobileSessionAttention = createMemo(() =>
     sessionTabAttention({ current: store.mobileTab, blocked: composer.blocked(), mobile: !isDesktop() }),
   )
@@ -1076,11 +1005,6 @@ export default function Page() {
     promptDock?.scrollIntoView({ block: "end", behavior: "smooth" })
   }
 
-  const wantsReview = createMemo(() =>
-    isDesktop()
-      ? desktopFileTreeOpen() || (desktopReviewOpen() && activeTab() === "review")
-      : store.mobileTab === "changes",
-  )
 
   createEffect(() => {
     const list = changesOptions()
@@ -1090,22 +1014,12 @@ export default function Page() {
     setStore("changes", next)
   })
 
-  createEffect(() => {
-    const mode = vcsMode()
-    if (!mode) return
-    if (!wantsReview()) return
-    void loadVcs(mode)
-  })
-
   createEffect(
     on(
       () => sync.data.session_status[params.id ?? ""]?.type,
       (next, prev) => {
-        const mode = vcsMode()
-        if (!mode) return
-        if (!wantsReview()) return
         if (next !== "idle" || prev === undefined || prev === "idle") return
-        void loadVcs(mode, true)
+        refreshVcs()
       },
       { defer: true },
     ),
@@ -1906,6 +1820,7 @@ export default function Page() {
 
   return (
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
+      {sessionSync() ?? ""}
       <SessionHeader />
       <div class="flex-1 min-h-0 flex flex-col md:flex-row">
         <Show when={!isDesktop() && !!params.id}>
